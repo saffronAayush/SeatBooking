@@ -13,16 +13,160 @@ enum UserRole {
   ADMIN
 }
 
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+enum ShowStatus {
+  SCHEDULED
+  CANCELLED
+}
+
+enum ShowSeatStatus {
+  AVAILABLE
+  HELD
+  BOOKED
+}
+
 model User {
   id            String         @id @default(uuid()) @db.Uuid
   email         String         @unique
   passwordHash  String
   roles         UserRole[]     @default([CUSTOMER])
   refreshTokens RefreshToken[]
+  organizer     Organizer?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
   @@map("users")
+}
+
+model Organizer {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @unique @db.Uuid
+  displayName String
+  description String?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venues      Venue[]
+  events      Event[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("organizers")
+}
+
+model Venue {
+  id          String         @id @default(uuid()) @db.Uuid
+  organizerId String         @db.Uuid
+  name        String
+  city        String
+  address     String
+  timezone    String         @default("Asia/Kolkata")
+  organizer   Organizer      @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  sections    VenueSection[]
+  shows       Show[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([organizerId, name, city])
+  @@index([city, name])
+  @@map("venues")
+}
+
+model VenueSection {
+  id        String @id @default(uuid()) @db.Uuid
+  venueId   String @db.Uuid
+  name      String
+  sortOrder Int    @default(0)
+  venue     Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  seats     Seat[]
+
+  @@unique([venueId, name])
+  @@index([venueId, sortOrder])
+  @@map("venue_sections")
+}
+
+model Seat {
+  id         String       @id @default(uuid()) @db.Uuid
+  sectionId  String       @db.Uuid
+  rowLabel   String
+  seatNumber String
+  category   String
+  section    VenueSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  showSeats  ShowSeat[]
+
+  @@unique([sectionId, rowLabel, seatNumber])
+  @@index([sectionId, category])
+  @@map("seats")
+}
+
+model Event {
+  id              String      @id @default(uuid()) @db.Uuid
+  organizerId     String      @db.Uuid
+  title           String
+  description     String?
+  category        String
+  durationMinutes Int
+  status          EventStatus @default(DRAFT)
+  organizer       Organizer   @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  shows           Show[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([status, category, title])
+  @@index([organizerId, createdAt])
+  @@map("events")
+}
+
+model Show {
+  id        String      @id @default(uuid()) @db.Uuid
+  eventId   String      @db.Uuid
+  venueId   String      @db.Uuid
+  startsAt  DateTime
+  endsAt    DateTime
+  status    ShowStatus  @default(SCHEDULED)
+  event     Event       @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  venue     Venue       @relation(fields: [venueId], references: [id], onDelete: Restrict)
+  prices    ShowPrice[]
+  showSeats ShowSeat[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([eventId, venueId, startsAt])
+  @@index([startsAt, status])
+  @@index([venueId, startsAt])
+  @@map("shows")
+}
+
+model ShowPrice {
+  id           String @id @default(uuid()) @db.Uuid
+  showId       String @db.Uuid
+  seatCategory String
+  priceMinor   Int
+  currency     String @default("INR") @db.VarChar(3)
+  show         Show   @relation(fields: [showId], references: [id], onDelete: Cascade)
+
+  @@unique([showId, seatCategory])
+  @@map("show_prices")
+}
+
+model ShowSeat {
+  id         String         @id @default(uuid()) @db.Uuid
+  showId     String         @db.Uuid
+  seatId     String         @db.Uuid
+  priceMinor Int
+  currency   String         @default("INR") @db.VarChar(3)
+  status     ShowSeatStatus @default(AVAILABLE)
+  show       Show           @relation(fields: [showId], references: [id], onDelete: Cascade)
+  seat       Seat           @relation(fields: [seatId], references: [id], onDelete: Restrict)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@unique([showId, seatId])
+  @@index([showId, status])
+  @@map("show_seats")
 }
 
 model RefreshToken {

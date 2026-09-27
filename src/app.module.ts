@@ -4,10 +4,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
+import { CatalogModule } from './catalog/catalog.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { envValidationSchema } from './config/env.validation';
 import { HealthModule } from './health/health.module';
+import { OrganizerModule } from './organizer/organizer.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -45,6 +47,8 @@ import { PrismaModule } from './prisma/prisma.module';
     }),
     PrismaModule,
     AuthModule,
+    CatalogModule,
+    OrganizerModule,
     HealthModule,
   ],
   providers: [

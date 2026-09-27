@@ -40,7 +40,11 @@ export class AuthService {
 
     try {
       const user = await this.prisma.user.create({
-        data: { email, passwordHash: await this.passwords.hash(dto.password) },
+        data: {
+          email,
+          passwordHash: await this.passwords.hash(dto.password),
+          roles: [dto.role ?? UserRole.CUSTOMER],
+        },
       });
       return this.createAuthResponse(user);
     } catch (error: unknown) {

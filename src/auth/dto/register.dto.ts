@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { UserRole } from '@prisma/client';
+import { IsEmail, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({ example: 'customer@example.com' })
@@ -12,4 +13,14 @@ export class RegisterDto {
   @MinLength(10)
   @MaxLength(128)
   password: string;
+
+  @ApiProperty({
+    enum: [UserRole.CUSTOMER, UserRole.ORGANIZER],
+    default: UserRole.CUSTOMER,
+    required: false,
+    description: 'Public registration cannot create administrator accounts',
+  })
+  @IsOptional()
+  @IsIn([UserRole.CUSTOMER, UserRole.ORGANIZER])
+  role?: UserRole;
 }

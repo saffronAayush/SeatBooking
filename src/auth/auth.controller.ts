@@ -28,8 +28,8 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  @ApiOperation({ summary: 'Register a customer account' })
-  @ApiCreatedResponse({ description: 'Customer registered successfully', type: AuthResponseDto })
+  @ApiOperation({ summary: 'Register a customer or organizer account' })
+  @ApiCreatedResponse({ description: 'Account registered successfully', type: AuthResponseDto })
   @ApiBadRequestResponse({ description: 'Request validation failed', type: ErrorResponseDto })
   @ApiConflictResponse({ description: 'Email is already registered', type: ErrorResponseDto })
   @ApiInternalServerErrorResponse({
