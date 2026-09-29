@@ -85,7 +85,6 @@ export class OrganizerService {
         title: dto.title.trim(),
         description: dto.description?.trim(),
         category: dto.category.trim().toUpperCase(),
-        durationMinutes: dto.durationMinutes,
         status: dto.status ?? EventStatus.DRAFT,
       },
     });
@@ -115,27 +114,61 @@ export class OrganizerService {
     const seats = venue.sections.flatMap((section) => section.seats);
     if (seats.length === 0) throw new BadRequestException('Venue has no seats');
 
-    const prices = new Map<string, { priceMinor: number; currency: string }>();
+    const priceKey = (sectionId: string, seatCategory: string) => `${sectionId}:${seatCategory}`;
+    const sectionsById = new Map(venue.sections.map((section) => [section.id, section]));
+    const prices = new Map<
+      string,
+      { sectionId: string; seatCategory: string; priceMinor: number }
+    >();
+
     for (const price of dto.prices) {
       const category = price.seatCategory.trim().toUpperCase();
-      if (prices.has(category)) {
-        throw new BadRequestException(`Duplicate price for seat category ${category}`);
+      const section = sectionsById.get(price.sectionId);
+      if (!section) {
+        throw new BadRequestException(
+          `Section ${price.sectionId} does not belong to the selected venue`,
+        );
       }
-      prices.set(category, {
+      if (!category) throw new BadRequestException('Seat category must not be blank');
+
+      const key = priceKey(section.id, category);
+      if (prices.has(key)) {
+        throw new BadRequestException(
+          `Duplicate price for section ${section.name} and seat category ${category}`,
+        );
+      }
+      prices.set(key, {
+        sectionId: section.id,
+        seatCategory: category,
         priceMinor: price.priceMinor,
-        currency: price.currency.trim().toUpperCase(),
       });
     }
 
-    const seatCategories = new Set(seats.map((seat) => seat.category));
-    const missing = [...seatCategories].filter((category) => !prices.has(category));
-    const unused = [...prices.keys()].filter((category) => !seatCategories.has(category));
+    const requiredPrices = new Map<string, string>();
+    for (const section of venue.sections) {
+      for (const seat of section.seats) {
+        const category = seat.category.trim().toUpperCase();
+        requiredPrices.set(priceKey(section.id, category), `${section.name} / ${category}`);
+      }
+    }
+
+    const missing = [...requiredPrices]
+      .filter(([key]) => !prices.has(key))
+      .map(([, label]) => label);
+    const unused = [...prices]
+      .filter(([key]) => !requiredPrices.has(key))
+      .map(([, price]) => {
+        const section = sectionsById.get(price.sectionId)!;
+        return `${section.name} / ${price.seatCategory}`;
+      });
     if (missing.length > 0) {
-      throw new BadRequestException(`Missing prices for seat categories: ${missing.join(', ')}`);
+      throw new BadRequestException(
+        `Missing prices for section/category pairs: ${missing.join(', ')}`,
+      );
     }
     if (unused.length > 0) {
       throw new BadRequestException(
-        `Prices supplied for unknown seat categories: ${unused.join(', ')}`,
+        `Prices supplied for unused section/category pairs: ${unused.join(', ')}`,
       );
     }
 
@@ -147,23 +180,31 @@ export class OrganizerService {
             venueId: venue.id,
             startsAt,
             endsAt,
+            currency: dto.currency.toUpperCase(),
             prices: {
-              create: [...prices].map(([seatCategory, price]) => ({ seatCategory, ...price })),
+              create: [...prices.values()],
             },
           },
-          include: { prices: true },
+          include: {
+            prices: {
+              orderBy: [{ sectionId: 'asc' }, { seatCategory: 'asc' }],
+              include: { section: { select: { id: true, name: true, sortOrder: true } } },
+            },
+          },
         });
 
+        const showPriceIds = new Map(
+          show.prices.map((price) => [priceKey(price.sectionId, price.seatCategory), price.id]),
+        );
+
         await transaction.showSeat.createMany({
-          data: seats.map((seat) => {
-            const price = prices.get(seat.category)!;
-            return {
-              showId: show.id,
-              seatId: seat.id,
-              priceMinor: price.priceMinor,
-              currency: price.currency,
-            };
-          }),
+          data: seats.map((seat) => ({
+            showId: show.id,
+            seatId: seat.id,
+            showPriceId: showPriceIds.get(
+              priceKey(seat.sectionId, seat.category.trim().toUpperCase()),
+            )!,
+          })),
         });
 
         return { ...show, inventoryCount: seats.length };

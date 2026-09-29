@@ -28,7 +28,7 @@ The catalog includes:
 - organizer profiles with ownership boundaries;
 - venues with nested sections and explicit physical seat layouts;
 - draft or published events;
-- scheduled shows with category-specific prices stored in minor currency units;
+- scheduled shows with one ISO currency and section/category-specific prices stored in minor units;
 - atomic generation of one inventory row per physical seat when a show is created;
 - public, paginated event search by name, city, venue, UTC date, and category;
 - public event details and live show-seat inventory endpoints;
@@ -97,7 +97,39 @@ Public routes:
 - `GET /events/:eventId`
 - `GET /shows/:showId/seats`
 
-Creating a show requires one price entry for every seat category in its venue. Show creation,
-prices, and generated seat inventory are committed in one PostgreSQL transaction.
+Creating a show requires one price entry for every distinct section/category pair used by its
+venue. For example, `Balcony / GOLD` and `Ground / GOLD` are separate prices. A show has one
+three-letter ISO currency, while each price stores an integer minor-unit amount.
+
+`ShowSeat` stores per-show availability for a physical seat and references the applicable
+`ShowPrice`; it does not copy the monetary amount or currency. The final amount paid should be
+snapshotted on the future booking item so historical purchases never change.
+
+Show creation, section/category prices, and generated seat inventory are committed in one
+PostgreSQL transaction.
+
+Example show payload:
+
+```json
+{
+  "eventId": "11111111-1111-4111-8111-111111111111",
+  "venueId": "22222222-2222-4222-8222-222222222222",
+  "startsAt": "2026-12-01T19:00:00.000Z",
+  "endsAt": "2026-12-01T22:00:00.000Z",
+  "currency": "INR",
+  "prices": [
+    {
+      "sectionId": "33333333-3333-4333-8333-333333333333",
+      "seatCategory": "SILVER",
+      "priceMinor": 50000
+    },
+    {
+      "sectionId": "44444444-4444-4444-8444-444444444444",
+      "seatCategory": "SILVER",
+      "priceMinor": 70000
+    }
+  ]
+}
+```
 
 Never use the example JWT secrets outside local development.

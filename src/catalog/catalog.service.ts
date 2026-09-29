@@ -53,7 +53,10 @@ export class CatalogService {
             take: 10,
             include: {
               venue: { select: { id: true, name: true, city: true, timezone: true } },
-              prices: { orderBy: { priceMinor: 'asc' } },
+              prices: {
+                orderBy: [{ sectionId: 'asc' }, { seatCategory: 'asc' }],
+                include: { section: { select: { id: true, name: true, sortOrder: true } } },
+              },
             },
           },
         },
@@ -82,7 +85,10 @@ export class CatalogService {
           orderBy: { startsAt: 'asc' },
           include: {
             venue: { select: { id: true, name: true, city: true, address: true, timezone: true } },
-            prices: { orderBy: { priceMinor: 'asc' } },
+            prices: {
+              orderBy: [{ sectionId: 'asc' }, { seatCategory: 'asc' }],
+              include: { section: { select: { id: true, name: true, sortOrder: true } } },
+            },
             _count: { select: { showSeats: true } },
           },
         },
@@ -102,7 +108,10 @@ export class CatalogService {
       include: {
         event: { select: { id: true, title: true, category: true } },
         venue: { select: { id: true, name: true, city: true, timezone: true } },
-        prices: { orderBy: { priceMinor: 'asc' } },
+        prices: {
+          orderBy: [{ sectionId: 'asc' }, { seatCategory: 'asc' }],
+          include: { section: { select: { id: true, name: true, sortOrder: true } } },
+        },
         showSeats: {
           orderBy: { createdAt: 'asc' },
           include: {
