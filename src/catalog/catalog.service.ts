@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { EventStatus, Prisma, ShowStatus } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
+import { EventStatus, ShowStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventSearchDto } from './dto/event-search.dto';
 

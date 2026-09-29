@@ -1,7 +1,8 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, User, UserRole } from '../generated/prisma/client';
+import { Prisma, User } from '../generated/prisma/client';
+import { UserRole } from '../generated/prisma/enums';
 import { randomUUID } from 'node:crypto';
 import { JwtPayload } from '../common/types/jwt-user.type';
 import { PrismaService } from '../prisma/prisma.service';

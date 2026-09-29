@@ -13,7 +13,10 @@ export class ErrorResponseDto {
       {
         type: 'array',
         items: { type: 'string' },
-        example: ['email must be an email', 'password must be longer than or equal to 10 characters'],
+        example: [
+          'email must be an email',
+          'password must be longer than or equal to 10 characters',
+        ],
       },
     ],
   })
