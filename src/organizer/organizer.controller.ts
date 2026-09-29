@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { UserRole } from '../generated/prisma/client';
 import {
   ApiBearerAuth,
   ApiConflictResponse,

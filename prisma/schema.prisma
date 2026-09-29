@@ -30,6 +30,39 @@ enum ShowSeatStatus {
   BOOKED
 }
 
+enum HoldStatus {
+  ACTIVE
+  RELEASED
+  EXPIRED
+  CONVERTED
+}
+
+enum PaymentIntentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum PaymentEventOutcome {
+  SUCCEEDED
+  FAILED
+}
+
+enum PaymentEventStatus {
+  PROCESSED
+  IGNORED
+}
+
+enum BookingStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+enum RefundStatus {
+  SUCCEEDED
+  FAILED
+}
+
 model User {
   id            String         @id @default(uuid()) @db.Uuid
   email         String         @unique
@@ -37,6 +70,10 @@ model User {
   roles         UserRole[]     @default([CUSTOMER])
   refreshTokens RefreshToken[]
   organizer     Organizer?
+  holds         Hold[]
+  bookings      Booking[]
+  paymentIntents PaymentIntent[]
+  idempotencyKeys IdempotencyKey[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -131,6 +168,7 @@ model Show {
   venue     Venue       @relation(fields: [venueId], references: [id], onDelete: Restrict)
   prices    ShowPrice[]
   showSeats ShowSeat[]
+  holds     Hold[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
@@ -159,14 +197,155 @@ model ShowSeat {
   priceMinor Int
   currency   String         @default("INR") @db.VarChar(3)
   status     ShowSeatStatus @default(AVAILABLE)
+  activeHoldId String?      @db.Uuid
+  holdExpiresAt DateTime?
   show       Show           @relation(fields: [showId], references: [id], onDelete: Cascade)
   seat       Seat           @relation(fields: [seatId], references: [id], onDelete: Restrict)
+  activeHold Hold?          @relation("ActiveHoldSeats", fields: [activeHoldId], references: [id], onDelete: SetNull)
+  holdSeats  HoldSeat[]
+  bookingSeats BookingSeat[]
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt
 
   @@unique([showId, seatId])
   @@index([showId, status])
+  @@index([status, holdExpiresAt])
+  @@index([activeHoldId])
   @@map("show_seats")
+}
+
+model Hold {
+  id          String     @id @default(uuid()) @db.Uuid
+  userId      String     @db.Uuid
+  showId      String     @db.Uuid
+  status      HoldStatus @default(ACTIVE)
+  expiresAt   DateTime
+  releasedAt  DateTime?
+  user        User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  show        Show       @relation(fields: [showId], references: [id], onDelete: Restrict)
+  seats       HoldSeat[]
+  activeShowSeats ShowSeat[] @relation("ActiveHoldSeats")
+  paymentIntents PaymentIntent[]
+  booking     Booking?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, expiresAt])
+  @@map("holds")
+}
+
+model HoldSeat {
+  id          String   @id @default(uuid()) @db.Uuid
+  holdId      String   @db.Uuid
+  showSeatId  String   @db.Uuid
+  priceMinor  Int
+  currency    String   @db.VarChar(3)
+  hold        Hold     @relation(fields: [holdId], references: [id], onDelete: Cascade)
+  showSeat    ShowSeat @relation(fields: [showSeatId], references: [id], onDelete: Restrict)
+
+  @@unique([holdId, showSeatId])
+  @@index([showSeatId])
+  @@map("hold_seats")
+}
+
+model PaymentIntent {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @db.Uuid
+  holdId         String              @db.Uuid
+  amountMinor    Int
+  currency       String              @db.VarChar(3)
+  status         PaymentIntentStatus @default(PENDING)
+  failureReason  String?
+  user           User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  hold           Hold                @relation(fields: [holdId], references: [id], onDelete: Restrict)
+  events         PaymentEvent[]
+  booking        Booking?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([holdId, status])
+  @@map("payment_intents")
+}
+
+model PaymentEvent {
+  id               String               @id @default(uuid()) @db.Uuid
+  providerEventId  String               @unique
+  paymentIntentId  String               @db.Uuid
+  outcome          PaymentEventOutcome
+  status           PaymentEventStatus
+  occurredAt       DateTime
+  response         Json
+  paymentIntent    PaymentIntent        @relation(fields: [paymentIntentId], references: [id], onDelete: Restrict)
+  createdAt        DateTime             @default(now())
+
+  @@index([paymentIntentId, createdAt])
+  @@map("payment_events")
+}
+
+model Booking {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @db.Uuid
+  holdId           String        @unique @db.Uuid
+  paymentIntentId  String        @unique @db.Uuid
+  status           BookingStatus @default(CONFIRMED)
+  totalMinor       Int
+  currency         String        @db.VarChar(3)
+  cancelledAt      DateTime?
+  user             User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  hold             Hold          @relation(fields: [holdId], references: [id], onDelete: Restrict)
+  paymentIntent    PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Restrict)
+  seats            BookingSeat[]
+  refund           Refund?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("bookings")
+}
+
+model BookingSeat {
+  id          String   @id @default(uuid()) @db.Uuid
+  bookingId   String   @db.Uuid
+  showSeatId  String   @db.Uuid
+  priceMinor  Int
+  currency    String   @db.VarChar(3)
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  showSeat    ShowSeat @relation(fields: [showSeatId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, showSeatId])
+  @@index([showSeatId])
+  @@map("booking_seats")
+}
+
+model Refund {
+  id          String       @id @default(uuid()) @db.Uuid
+  bookingId   String       @unique @db.Uuid
+  amountMinor Int
+  currency    String       @db.VarChar(3)
+  status      RefundStatus
+  refundedAt  DateTime?
+  booking     Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@map("refunds")
+}
+
+model IdempotencyKey {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  scope       String
+  key         String
+  requestHash String
+  response    Json
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, scope, key])
+  @@index([createdAt])
+  @@map("idempotency_keys")
 }
 
 model RefreshToken {

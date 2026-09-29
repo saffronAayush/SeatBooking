@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { EventStatus, Prisma, ShowStatus } from '@prisma/client';
+import { EventStatus, Prisma, ShowSeatStatus, ShowStatus } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventSearchDto } from './dto/event-search.dto';
 
@@ -119,6 +119,22 @@ export class CatalogService {
       },
     });
     if (!show) throw new NotFoundException('Show not found');
-    return show;
+    return {
+      ...show,
+      showSeats: show.showSeats.map((showSeat) => ({
+        id: showSeat.id,
+        showId: showSeat.showId,
+        seatId: showSeat.seatId,
+        priceMinor: showSeat.priceMinor,
+        currency: showSeat.currency,
+        status:
+          showSeat.status === ShowSeatStatus.HELD &&
+          showSeat.holdExpiresAt !== null &&
+          showSeat.holdExpiresAt <= new Date()
+            ? ShowSeatStatus.AVAILABLE
+            : showSeat.status,
+        seat: showSeat.seat,
+      })),
+    };
   }
 }

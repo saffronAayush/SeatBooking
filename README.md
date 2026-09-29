@@ -34,6 +34,26 @@ The catalog includes:
 - public event details and live show-seat inventory endpoints;
 - database uniqueness constraints and indexes for catalog searches and inventory access.
 
+### Phase 3 - Correct reservations
+
+- atomic multi-seat holds using ordered PostgreSQL row locks;
+- five-minute configurable hold expiry with an idempotent background sweep;
+- explicit hold release and effective availability for expired seats;
+- retry-safe hold creation and release through `Idempotency-Key`;
+- immutable price snapshots on every held seat.
+
+### Phase 4 - Booking and payments
+
+- idempotent payment-intent creation from active holds;
+- authenticated simulator callbacks and signed public webhook callbacks;
+- duplicate, delayed, failed, and out-of-order callback handling;
+- atomic payment success, booking creation, and seat confirmation;
+- paginated customer booking history and booking details;
+- cancellation, inventory release, and simulated refunds.
+
+Automated tests are intentionally deferred for now. The Phase 3 high-contention test work is
+therefore the only excluded item from these phases.
+
 ## Local development
 
 Requirements: Node.js 24+, npm, and Docker.
@@ -99,5 +119,23 @@ Public routes:
 
 Creating a show requires one price entry for every seat category in its venue. Show creation,
 prices, and generated seat inventory are committed in one PostgreSQL transaction.
+
+## Reservation and booking endpoints
+
+These routes require a customer access token. Retryable writes require an `Idempotency-Key`:
+
+- `POST /holds`
+- `GET /holds/:holdId`
+- `DELETE /holds/:holdId`
+- `POST /payments/intents`
+- `POST /payments/simulator/callback`
+- `GET /bookings`
+- `GET /bookings/:bookingId`
+- `POST /bookings/:bookingId/cancel`
+
+The public `POST /payments/webhooks/simulator` route expects `X-Simulator-Signature`, an HMAC
+SHA-256 hex digest over `paymentIntentId.providerEventId.outcome.occurredAt`, using
+`PAYMENT_SIMULATOR_SECRET`. Omit the final value (but keep the final dot) when `occurredAt` is
+absent. The authenticated simulator callback is the convenient local-development path.
 
 Never use the example JWT secrets outside local development.

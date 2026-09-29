@@ -1,4 +1,4 @@
-import { EventStatus } from '@prisma/client';
+import { EventStatus } from '../../generated/prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEnum,
