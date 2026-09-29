@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
+import { UserRole } from '../../generated/prisma/client';
 
 export class SafeUserResponseDto {
   @ApiProperty({ format: 'uuid', example: 'aa88bb55-fbc5-4f4c-a24f-f42e1bcb3219' })
