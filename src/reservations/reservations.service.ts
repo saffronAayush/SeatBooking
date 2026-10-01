@@ -34,6 +34,7 @@ const holdInclude = {
   },
 } satisfies Prisma.HoldInclude;
 
+// TODO: use socket for hold and unhold.
 @Injectable()
 export class ReservationsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ReservationsService.name);
@@ -141,7 +142,10 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
         data: { status: ShowSeatStatus.HELD, activeHoldId: hold.id, holdExpiresAt: expiresAt },
       });
 
-      const response = await tx.hold.findUniqueOrThrow({ where: { id: hold.id }, include: holdInclude });
+      const response = await tx.hold.findUniqueOrThrow({
+        where: { id: hold.id },
+        include: holdInclude,
+      });
       await tx.idempotencyKey.create({
         data: { userId, scope, key, requestHash: hash, response: this.asJson(response) },
       });
@@ -157,7 +161,10 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
     if (!hold) throw new NotFoundException('Hold not found');
     if (hold.status === HoldStatus.ACTIVE && hold.expiresAt <= new Date()) {
       await this.expireOne(hold.id);
-      hold = await this.prisma.hold.findFirst({ where: { id: holdId, userId }, include: holdInclude });
+      hold = await this.prisma.hold.findFirst({
+        where: { id: holdId, userId },
+        include: holdInclude,
+      });
     }
     return hold;
   }
@@ -177,7 +184,9 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
       );
       if (replay !== undefined) return replay;
 
-      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "holds" WHERE "id" = ${holdId}::uuid FOR UPDATE`);
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "holds" WHERE "id" = ${holdId}::uuid FOR UPDATE`,
+      );
       const hold = await tx.hold.findFirst({ where: { id: holdId, userId } });
       if (!hold) throw new NotFoundException('Hold not found');
       if (hold.status !== HoldStatus.ACTIVE) {
@@ -215,7 +224,9 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
 
   private async expireOne(holdId: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "holds" WHERE "id" = ${holdId}::uuid FOR UPDATE`);
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "holds" WHERE "id" = ${holdId}::uuid FOR UPDATE`,
+      );
       const hold = await tx.hold.findUnique({ where: { id: holdId } });
       if (!hold || hold.status !== HoldStatus.ACTIVE || hold.expiresAt > new Date()) return;
       await this.lockHoldSeats(tx, holdId);
