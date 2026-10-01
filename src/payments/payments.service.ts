@@ -1,11 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   BookingStatus,
   HoldStatus,
@@ -22,16 +15,9 @@ import { PaymentCallbackDto } from './dto/payment-callback.dto';
 
 @Injectable()
 export class PaymentsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async createIntent(
-    userId: string,
-    keyHeader: string | undefined,
-    dto: CreatePaymentIntentDto,
-  ) {
+  async createIntent(userId: string, keyHeader: string | undefined, dto: CreatePaymentIntentDto) {
     const key = requireIdempotencyKey(keyHeader);
     const scope = 'POST:/payments/intents';
     const hash = requestHash(dto);
@@ -49,13 +35,6 @@ export class PaymentsService {
       await tx.$queryRaw(Prisma.sql`
         SELECT "id" FROM "holds" WHERE "id" = ${dto.holdId}::uuid FOR UPDATE
       `);
-      const replayAfterLock = replayResponse(
-        await tx.idempotencyKey.findUnique({
-          where: { userId_scope_key: { userId, scope, key } },
-        }),
-        hash,
-      );
-      if (replayAfterLock !== undefined) return replayAfterLock;
 
       const hold = await tx.hold.findFirst({
         where: { id: dto.holdId, userId },
@@ -81,24 +60,6 @@ export class PaymentsService {
       });
       return response;
     });
-  }
-
-  verifySimulatorSignature(signature: string | undefined, dto: PaymentCallbackDto): void {
-    if (!signature) throw new UnauthorizedException('Missing simulator signature');
-    const expected = createHmac(
-      'sha256',
-      this.config.getOrThrow<string>('PAYMENT_SIMULATOR_SECRET'),
-    )
-      .update(this.signaturePayload(dto))
-      .digest('hex');
-    const suppliedBuffer = Buffer.from(signature, 'utf8');
-    const expectedBuffer = Buffer.from(expected, 'utf8');
-    if (
-      suppliedBuffer.length !== expectedBuffer.length ||
-      !timingSafeEqual(suppliedBuffer, expectedBuffer)
-    ) {
-      throw new UnauthorizedException('Invalid simulator signature');
-    }
   }
 
   async processCallback(dto: PaymentCallbackDto, expectedUserId?: string) {
@@ -242,7 +203,10 @@ export class PaymentsService {
     });
     await tx.hold.updateMany({
       where: { id: holdId, status: HoldStatus.ACTIVE },
-      data: { status: reason === 'HOLD_EXPIRED' ? HoldStatus.EXPIRED : HoldStatus.RELEASED, releasedAt: new Date() },
+      data: {
+        status: reason === 'HOLD_EXPIRED' ? HoldStatus.EXPIRED : HoldStatus.RELEASED,
+        releasedAt: new Date(),
+      },
     });
     return {
       paymentIntentId,
@@ -306,10 +270,6 @@ export class PaymentsService {
     await tx.$queryRaw(Prisma.sql`
       SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${scope}:${key}`}, 0))
     `);
-  }
-
-  private signaturePayload(dto: PaymentCallbackDto): string {
-    return [dto.paymentIntentId, dto.providerEventId, dto.outcome, dto.occurredAt ?? ''].join('.');
   }
 
   private asJson(value: unknown): Prisma.InputJsonValue {

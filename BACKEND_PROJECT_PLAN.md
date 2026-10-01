@@ -297,7 +297,7 @@ GET    /holds/:holdId
 DELETE /holds/:holdId
 
 POST   /payments/intents
-POST   /payments/webhooks/simulator
+POST   /payments/simulator/callback
 
 GET    /bookings
 GET    /bookings/:bookingId
@@ -417,7 +417,7 @@ Stateless APIs -- per-user/route rate limits, bounded DB pool
 - Apply RBAC and ownership checks on organizer resources.
 - Rate-limit login, seat-map refresh, and hold endpoints.
 - Apply WAF rules and bot/abuse protection to public flash-sale endpoints in V2.
-- Verify payment webhook signatures in the simulator.
+- Authenticate payment simulator callbacks with the customer JWT and verify intent ownership.
 - Never log passwords, full tokens, or sensitive payment data.
 - Maintain immutable audit records for administrative changes.
 - Use parameterized queries and standard HTTP security headers.

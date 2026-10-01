@@ -13,7 +13,4 @@ export const envValidationSchema = Joi.object({
   JWT_REFRESH_TTL_DAYS: Joi.number().integer().positive().default(30),
   HOLD_TTL_SECONDS: Joi.number().integer().positive().default(300),
   HOLD_EXPIRY_INTERVAL_MS: Joi.number().integer().min(1000).default(5000),
-  PAYMENT_SIMULATOR_SECRET: Joi.string()
-    .min(32)
-    .default('local-payment-simulator-secret-123456'),
 });

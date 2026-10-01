@@ -45,7 +45,7 @@ The catalog includes:
 ### Phase 4 - Booking and payments
 
 - idempotent payment-intent creation from active holds;
-- authenticated simulator callbacks and signed public webhook callbacks;
+- JWT-authenticated simulator callbacks for successful and failed local payments;
 - duplicate, delayed, failed, and out-of-order callback handling;
 - atomic payment success, booking creation, and seat confirmation;
 - paginated customer booking history and booking details;
@@ -165,9 +165,7 @@ These routes require a customer access token. Retryable writes require an `Idemp
 - `GET /bookings/:bookingId`
 - `POST /bookings/:bookingId/cancel`
 
-The public `POST /payments/webhooks/simulator` route expects `X-Simulator-Signature`, an HMAC
-SHA-256 hex digest over `paymentIntentId.providerEventId.outcome.occurredAt`, using
-`PAYMENT_SIMULATOR_SECRET`. Omit the final value (but keep the final dot) when `occurredAt` is
-absent. The authenticated simulator callback is the convenient local-development path.
+The JWT-authenticated `POST /payments/simulator/callback` route simulates a successful or failed
+local payment for a payment intent owned by the customer.
 
 Never use the example JWT secrets outside local development.

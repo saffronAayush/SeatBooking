@@ -62,7 +62,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
 
   async create(userId: string, keyHeader: string | undefined, dto: CreateHoldDto) {
     const key = requireIdempotencyKey(keyHeader);
-    const showSeatIds = [...new Set(dto.showSeatIds)].sort();
+    const showSeatIds = [...new Set(dto.showSeatIds)].sort(); // sorting to remove deadlock situation
     if (showSeatIds.length !== dto.showSeatIds.length) {
       throw new BadRequestException('showSeatIds must not contain duplicates');
     }
@@ -132,8 +132,8 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
           seats: {
             create: seats.map((seat) => ({
               showSeatId: seat.id,
-            priceMinor: seat.showPrice.priceMinor,
-            currency: seat.show.currency,
+              priceMinor: seat.showPrice.priceMinor,
+              currency: seat.show.currency,
             })),
           },
         },
@@ -206,7 +206,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
       const response = await tx.hold.update({
         where: { id: holdId },
         data: { status, releasedAt: now },
-        include: holdInclude,
+        select: { id: true, status: true, releasedAt: true },
       });
       await tx.idempotencyKey.create({
         data: { userId, scope, key, requestHash: hash, response: this.asJson(response) },
