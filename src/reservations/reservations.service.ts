@@ -47,6 +47,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     const intervalMs = this.config.get<number>('HOLD_EXPIRY_INTERVAL_MS', 5000);
+    // TODO: Prevent overlapping expiry sweeps when a previous sweep is still running.
     this.expiryTimer = setInterval(() => {
       void this.expireDueHolds().catch((error: unknown) =>
         this.logger.error('Hold expiry sweep failed', error),
@@ -78,6 +79,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
       );
       if (initialReplay !== undefined) return initialReplay;
 
+      // TODO: Coordinate show cancellation and price updates with hold creation using row locks.
       const show = await tx.show.findFirst({
         where: {
           id: dto.showId,
@@ -89,20 +91,13 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
       if (!show) throw new NotFoundException('Bookable show not found');
       if (show.startsAt <= new Date()) throw new ConflictException('This show has already started');
 
+      // TODO: Review transaction and PostgreSQL lock timeouts for requests waiting on seats.
       await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT "id" FROM "show_seats"
         WHERE "showId" = ${dto.showId}::uuid
           AND "id" IN (${Prisma.join(showSeatIds.map((id) => Prisma.sql`${id}::uuid`))})
         ORDER BY "id" FOR UPDATE
       `);
-
-      const replayAfterLock = replayResponse(
-        await tx.idempotencyKey.findUnique({
-          where: { userId_scope_key: { userId, scope, key } },
-        }),
-        hash,
-      );
-      if (replayAfterLock !== undefined) return replayAfterLock;
 
       const seats = await tx.showSeat.findMany({
         where: { id: { in: showSeatIds }, showId: dto.showId },
@@ -121,6 +116,8 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
 
       const currencies = new Set(seats.map((seat) => seat.currency));
       if (currencies.size !== 1) throw new ConflictException('Selected seats use mixed currencies');
+      // TODO(v2): Detect price changes between seat display and hold creation, return the latest
+      // price, and require explicit customer confirmation before creating the hold.
       const ttlSeconds = this.config.get<number>('HOLD_TTL_SECONDS', 300);
       const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
       const hold = await tx.hold.create({
@@ -137,6 +134,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
           },
         },
       });
+      // TODO: Verify the update count matches the number of requested seats.
       await tx.showSeat.updateMany({
         where: { id: { in: showSeatIds }, status: ShowSeatStatus.AVAILABLE },
         data: { status: ShowSeatStatus.HELD, activeHoldId: hold.id, holdExpiresAt: expiresAt },
@@ -146,6 +144,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
         where: { id: hold.id },
         include: holdInclude,
       });
+      // TODO: Add retention and cleanup for old idempotency-key records.
       await tx.idempotencyKey.create({
         data: { userId, scope, key, requestHash: hash, response: this.asJson(response) },
       });
@@ -213,6 +212,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async expireDueHolds(): Promise<void> {
+    // TODO: Add pagination or repeated batch processing for more than 100 expired holds.
     const due = await this.prisma.hold.findMany({
       where: { status: HoldStatus.ACTIVE, expiresAt: { lte: new Date() } },
       orderBy: { expiresAt: 'asc' },
