@@ -102,6 +102,10 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
       const seats = await tx.showSeat.findMany({
         where: { id: { in: showSeatIds }, showId: dto.showId },
         orderBy: { id: 'asc' },
+        include: {
+          show: { select: { currency: true } },
+          showPrice: { select: { priceMinor: true } },
+        },
       });
       if (seats.length !== showSeatIds.length) {
         throw new BadRequestException('One or more seats do not belong to this show');
@@ -114,7 +118,7 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
         });
       }
 
-      const currencies = new Set(seats.map((seat) => seat.currency));
+      const currencies = new Set(seats.map((seat) => seat.show.currency));
       if (currencies.size !== 1) throw new ConflictException('Selected seats use mixed currencies');
       // TODO(v2): Detect price changes between seat display and hold creation, return the latest
       // price, and require explicit customer confirmation before creating the hold.
@@ -128,8 +132,8 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
           seats: {
             create: seats.map((seat) => ({
               showSeatId: seat.id,
-              priceMinor: seat.priceMinor,
-              currency: seat.currency,
+            priceMinor: seat.showPrice.priceMinor,
+            currency: seat.show.currency,
             })),
           },
         },

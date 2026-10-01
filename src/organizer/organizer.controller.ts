@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { UserRole } from '../generated/prisma/client';
+import { UserRole } from '../generated/prisma/enums';
 import {
   ApiBearerAuth,
   ApiConflictResponse,
@@ -58,9 +58,9 @@ export class OrganizerController {
 
   @Post('shows')
   @ApiOperation({
-    summary: 'Schedule a show, configure category prices, and generate show-seat inventory',
+    summary: 'Schedule a show, configure section/category prices, and generate seat inventory',
   })
-  @ApiCreatedResponse({ description: 'Show and immutable seat inventory created atomically' })
+  @ApiCreatedResponse({ description: 'Show, pricing, and seat inventory created atomically' })
   createShow(@CurrentUser() user: JwtUser, @Body() dto: CreateShowDto) {
     return this.organizer.createShow(user.id, dto);
   }

@@ -1,15 +1,6 @@
-import { EventStatus } from '../../generated/prisma/client';
+import { EventStatus } from '../../generated/prisma/enums';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  Max,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator';
+import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateEventDto {
   @ApiProperty({ example: 'The Midnight Tour' })
@@ -29,12 +20,6 @@ export class CreateEventDto {
   @MinLength(2)
   @MaxLength(80)
   category: string;
-
-  @ApiProperty({ example: 150 })
-  @IsInt()
-  @Min(1)
-  @Max(1440)
-  durationMinutes: number;
 
   @ApiPropertyOptional({ enum: EventStatus, default: EventStatus.DRAFT })
   @IsOptional()
