@@ -1,10 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import {
-  BookingStatus,
-  Prisma,
-  RefundStatus,
-  ShowSeatStatus,
-} from '../generated/prisma/client';
+import { BookingStatus, Prisma, RefundStatus, ShowSeatStatus } from '../generated/prisma/client';
 import { replayResponse, requestHash, requireIdempotencyKey } from '../common/idempotency';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingQueryDto } from './dto/booking-query.dto';
@@ -18,7 +13,14 @@ const bookingInclude = {
     include: {
       showSeat: {
         include: {
-          show: { select: { id: true, startsAt: true, endsAt: true, event: { select: { id: true, title: true } } } },
+          show: {
+            select: {
+              id: true,
+              startsAt: true,
+              endsAt: true,
+              event: { select: { id: true, title: true } },
+            },
+          },
           seat: { include: { section: { select: { id: true, name: true } } } },
         },
       },
