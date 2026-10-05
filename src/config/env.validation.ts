@@ -2,6 +2,18 @@ import * as Joi from 'joi';
 
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
+  REDIS_URL: Joi.string()
+    .uri({ scheme: ['redis', 'rediss'] })
+    .default('redis://localhost:6379'),
+  REDIS_TIMEOUT_MS: Joi.number().integer().min(100).max(5000).default(500),
+  CATALOG_CACHE_TTL_SECONDS: Joi.number().integer().min(1).max(60).default(15),
+  RATE_LIMIT_AUTH: Joi.number().integer().positive().default(20),
+  RATE_LIMIT_HOLDS: Joi.number().integer().positive().default(30),
+  RATE_LIMIT_SEATS: Joi.number().integer().positive().default(120),
+  RATE_LIMIT_CATALOG: Joi.number().integer().positive().default(120),
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(1).default(0),
+  OPERATIONS_PORT: Joi.number().port().default(9464),
+  DB_POOL_MAX: Joi.number().integer().min(1).max(50).default(10),
   PORT: Joi.number().port().default(3000),
   LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').default('info'),
   DATABASE_URL: Joi.string()

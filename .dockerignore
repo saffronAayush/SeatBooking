@@ -5,3 +5,5 @@ coverage
 .env
 tmp
 Resume_Aayush.pdf
+
+.npm-cache

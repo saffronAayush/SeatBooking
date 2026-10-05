@@ -10,7 +10,7 @@ export class PrismaService extends PrismaClient implements OnApplicationShutdown
       connectionString: config.getOrThrow<string>('DATABASE_URL'),
       // Background recovery must return to its retry loop when PostgreSQL is down
       // or contended, instead of keeping the worker (and shutdown) blocked forever.
-      max: 10,
+      max: config.get<number>('DB_POOL_MAX', 10),
       connectionTimeoutMillis: 5000,
       statement_timeout: 10000,
       lock_timeout: 3000,

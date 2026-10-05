@@ -1,3 +1,4 @@
+import { ObservabilityModule } from '../observability/observability.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
@@ -25,6 +26,7 @@ import { WorkerService } from './worker.service';
       }),
     }),
     PrismaModule,
+    ObservabilityModule,
     OutboxModule,
   ],
   providers: [

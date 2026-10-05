@@ -1,3 +1,4 @@
+import { MetricsService } from '../observability/metrics.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ConsumeMessage } from 'amqplib';
@@ -15,6 +16,7 @@ export class NotificationWorkerService {
     private readonly prisma: PrismaService,
     private readonly rabbit: RabbitMqService,
     private readonly config: ConfigService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async handle(message: ConsumeMessage): Promise<void> {
@@ -33,7 +35,10 @@ export class NotificationWorkerService {
         const receipt = await tx.consumedEvent.findUnique({
           where: { consumer_eventId: { consumer: CONSUMER, eventId: event.id } },
         });
-        if (receipt) return;
+        if (receipt) {
+          this.metrics.deliveries.inc({ outcome: 'duplicate' });
+          return;
+        }
         // Read recipients and monetary data from PostgreSQL, never from broker payloads.
         const source = await tx.outboxEvent.findUniqueOrThrow({ where: { id: event.id } });
         if (source.eventType !== event.type || source.aggregateId !== event.aggregateId) {
@@ -42,6 +47,7 @@ export class NotificationWorkerService {
         await this.applyEvent(tx, event);
         await tx.consumedEvent.create({ data: { consumer: CONSUMER, eventId: event.id } });
       });
+      this.metrics.deliveries.inc({ outcome: 'processed' });
       this.logger.log(
         { eventId: event.id, eventType: event.type, correlationId: event.correlationId },
         'Business event processed',
@@ -208,9 +214,14 @@ export class NotificationWorkerService {
         type: message.properties.type,
         contentType: message.properties.contentType,
         correlationId: message.properties.correlationId,
-        headers: { 'x-retry-count': dead ? attempt : attempt + 1, 'x-failure-reason': reason },
+        headers: {
+          ...message.properties.headers,
+          'x-retry-count': dead ? attempt : attempt + 1,
+          'x-failure-reason': reason,
+        },
       },
     );
+    this.metrics.deliveries.inc({ outcome: dead ? 'dead' : 'retry' });
     // The caller acknowledges the original only after this publish is confirmed.
     this.logger.warn(
       { eventId: message.properties.messageId, attempt, reason },

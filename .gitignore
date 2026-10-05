@@ -10,3 +10,5 @@ coverage/
 .vscode/
 tmp/
 learning.md
+
+.npm-cache/

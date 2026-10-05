@@ -1,3 +1,4 @@
+import { context, propagation } from '@opentelemetry/api';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { EventType } from './domain-event';
@@ -12,13 +13,15 @@ export class OutboxService {
     aggregateId: string,
     payload: Prisma.InputJsonObject,
   ): Promise<void> {
+    const traceContext: Record<string, string> = {};
+    propagation.inject(context.active(), traceContext);
     await tx.outboxEvent.upsert({
       where: { eventKey: `${eventType}:${aggregateId}` },
       create: {
         eventKey: `${eventType}:${aggregateId}`,
         eventType,
         aggregateId,
-        payload,
+        payload: { ...payload, traceContext },
         correlationId: requestContext.getStore()?.correlationId ?? aggregateId,
       },
       update: {},

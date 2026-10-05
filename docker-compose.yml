@@ -26,6 +26,7 @@ services:
       - '15672:15672'
     volumes:
       - seatforge-rabbitmq:/var/lib/rabbitmq
+      - ./infra/rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 5s
@@ -43,35 +44,56 @@ services:
       postgres:
         condition: service_healthy
 
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--maxmemory', '128mb', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '127.0.0.1:6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build:
       context: .
       target: production
     command: ['node', 'dist/main.js']
-    environment:
+    restart: unless-stopped
+    stop_grace_period: 60s
+    deploy:
+      replicas: 2
+    environment: &api-environment
       NODE_ENV: production
       PORT: 3000
       LOG_LEVEL: info
       DATABASE_URL: postgresql://seatforge:seatforge@postgres:5432/seatforge?schema=public
+      REDIS_URL: redis://redis:6379
+      TRUST_PROXY_HOPS: 1
+      DB_POOL_MAX: 10
+      OPERATIONS_PORT: 9464
       JWT_ACCESS_SECRET: local-docker-access-secret-change-before-deploying
       JWT_REFRESH_SECRET: local-docker-refresh-secret-change-before-deploying
-      JWT_ACCESS_TTL_SECONDS: 900
-      JWT_REFRESH_TTL_DAYS: 30
-    ports:
-      - '3000:3000'
+      OTEL_SERVICE_NAME: seatforge-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      OTEL_TRACES_SAMPLER: parentbased_traceidratio
+      OTEL_TRACES_SAMPLER_ARG: '0.1'
     depends_on:
       migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_started
     healthcheck:
       test:
         [
           'CMD',
           'node',
           '-e',
-          "fetch('http://localhost:3000/api/v1/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://localhost:9464/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 10s
-      timeout: 3s
+      timeout: 12s
       retries: 5
 
   worker:
@@ -81,10 +103,11 @@ services:
     command: ['node', 'dist/worker.js']
     restart: unless-stopped
     stop_grace_period: 60s
+    deploy:
+      replicas: 2
     environment:
-      NODE_ENV: production
-      LOG_LEVEL: info
-      DATABASE_URL: postgresql://seatforge:seatforge@postgres:5432/seatforge?schema=public
+      <<: *api-environment
+      OTEL_SERVICE_NAME: seatforge-worker
       RABBITMQ_URL: amqp://seatforge:seatforge@rabbitmq:5672?heartbeat=10
       HOLD_EXPIRY_INTERVAL_MS: 5000
       RECONCILIATION_INTERVAL_MS: 30000
@@ -95,7 +118,66 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_started
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:9464/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 12s
+      retries: 5
+
+  nginx:
+    image: nginx:1.28-alpine
+    ports:
+      - '3000:80'
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1/health/live']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    ports:
+      - '127.0.0.1:9090:9090'
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - seatforge-prometheus:/prometheus
+
+  tempo:
+    image: grafana/tempo:2.7.2
+    command: ['-config.file=/etc/tempo.yml']
+    volumes:
+      - ./infra/tempo/tempo.yml:/etc/tempo.yml:ro
+      - seatforge-tempo:/var/tempo
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    ports:
+      - '127.0.0.1:3001:3000'
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-seatforge-local}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - seatforge-grafana:/var/lib/grafana
 
 volumes:
   seatforge-postgres:
   seatforge-rabbitmq:
+  seatforge-prometheus:
+  seatforge-tempo:
+  seatforge-grafana:

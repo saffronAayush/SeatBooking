@@ -28,6 +28,10 @@ export class RabbitMqService {
 
   constructor(private readonly config: ConfigService) {}
 
+  isReady(): boolean {
+    return Boolean(this.session?.consumerTag) && this.accepting && !this.stopping;
+  }
+
   retryDelay(attempt: number): number {
     return Math.min(
       this.config.get<number>('WORKER_RETRY_BASE_MS', 1000) * 2 ** (attempt - 1),

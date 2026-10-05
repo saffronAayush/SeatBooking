@@ -1,6 +1,6 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import {
-  ApiInternalServerErrorResponse,
+  ApiServiceUnavailableResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -27,12 +27,16 @@ export class HealthController {
   @Get('ready')
   @ApiOperation({ summary: 'Database readiness check' })
   @ApiOkResponse({ description: 'Application and database are ready', type: ReadinessResponseDto })
-  @ApiInternalServerErrorResponse({
-    description: 'Database is unreachable or an unexpected server error occurred',
+  @ApiServiceUnavailableResponse({
+    description: 'Database is unreachable',
     type: ErrorResponseDto,
   })
   async ready(): Promise<ReadinessResponseDto> {
-    await this.prisma.$queryRaw`SELECT 1`;
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+    } catch {
+      throw new ServiceUnavailableException('Database unavailable');
+    }
     return { status: 'ok', database: 'reachable', timestamp: new Date().toISOString() };
   }
 }

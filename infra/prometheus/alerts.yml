@@ -1,0 +1,31 @@
+groups:
+  - name: seatforge
+    rules:
+      - alert: SeatForgeReplicaDown
+        expr: up{job=~"seatforge-.*"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'A SeatForge replica cannot be scraped'
+      - alert: SeatForgeHighErrors
+        expr: sum(rate(seatforge_http_duration_seconds_count{status=~"5.."}[5m])) / clamp_min(sum(rate(seatforge_http_duration_seconds_count[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'API server error rate exceeds 5%'
+      - alert: SeatForgeDeadLetters
+        expr: rabbitmq_queue_messages{queue="seatforge.notifications.dead"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Notification dead-letter queue requires inspection'
+      - alert: SeatForgeWorkerDisconnected
+        expr: seatforge_worker_broker_ready{job="seatforge-worker"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Worker has no active RabbitMQ consumer'

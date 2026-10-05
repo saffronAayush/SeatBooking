@@ -1,3 +1,5 @@
+import { MetricsService } from '../observability/metrics.service';
+import { OperationsService } from '../observability/operations.service';
 import { BeforeApplicationShutdown, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ReservationsService } from '../reservations/reservations.service';
@@ -15,6 +17,8 @@ export class WorkerService implements OnModuleInit, BeforeApplicationShutdown {
 
   constructor(
     private readonly config: ConfigService,
+    private readonly metrics: MetricsService,
+    private readonly operations: OperationsService,
     private readonly rabbit: RabbitMqService,
     private readonly publisher: OutboxPublisherService,
     private readonly notifications: NotificationWorkerService,
@@ -23,6 +27,8 @@ export class WorkerService implements OnModuleInit, BeforeApplicationShutdown {
   ) {}
 
   onModuleInit(): void {
+    this.operations.setDependencyProbe(() => !this.stopping && this.rabbit.isReady());
+    this.metrics.brokerReady = () => this.rabbit.isReady();
     this.startLoop('consumer', this.config.get<number>('WORKER_RECONNECT_MS', 5000), () =>
       this.rabbit.ensureConsumer((message) => this.notifications.handle(message)),
     );
@@ -47,11 +53,15 @@ export class WorkerService implements OnModuleInit, BeforeApplicationShutdown {
       if (this.stopping) return;
       const timer = setTimeout(() => {
         this.timers.delete(timer);
+        const end = this.metrics.jobs.startTimer({ task: name });
+        let outcome = 'success';
         const task = action()
           .catch(() => {
+            outcome = 'error';
             this.logger.warn({ job: name }, 'Worker job deferred until the next sweep');
           })
           .finally(() => {
+            end({ outcome });
             this.active.delete(task);
             schedule(interval);
           });

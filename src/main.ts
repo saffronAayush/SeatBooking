@@ -1,3 +1,4 @@
+import './observability/telemetry';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -12,7 +13,7 @@ async function bootstrap(): Promise<void> {
 
   // Trusts X-Forwarded-* headers added by a reverse proxy/load balancer.
   // Enable only when clients cannot bypass a trusted proxy that sanitizes these headers.
-  app.set('trust proxy', true);
+  app.set('trust proxy', app.get(ConfigService).get<number>('TRUST_PROXY_HOPS', 0));
 
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix('api/v1');
