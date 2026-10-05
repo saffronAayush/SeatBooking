@@ -2,10 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
-  OnModuleDestroy,
-  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -17,6 +14,7 @@ import {
 } from '../generated/prisma/client';
 import { replayResponse, requestHash, requireIdempotencyKey } from '../common/idempotency';
 import { PrismaService } from '../prisma/prisma.service';
+import { OutboxService } from '../outbox/outbox.service';
 import { CreateHoldDto } from './dto/create-hold.dto';
 
 const holdInclude = {
@@ -36,29 +34,12 @@ const holdInclude = {
 
 // TODO: use socket for hold and unhold.
 @Injectable()
-export class ReservationsService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(ReservationsService.name);
-  private expiryTimer?: ReturnType<typeof setInterval>;
-
+export class ReservationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly outbox: OutboxService,
   ) {}
-
-  onModuleInit(): void {
-    const intervalMs = this.config.get<number>('HOLD_EXPIRY_INTERVAL_MS', 5000);
-    // TODO: Prevent overlapping expiry sweeps when a previous sweep is still running.
-    this.expiryTimer = setInterval(() => {
-      void this.expireDueHolds().catch((error: unknown) =>
-        this.logger.error('Hold expiry sweep failed', error),
-      );
-    }, intervalMs);
-    this.expiryTimer.unref();
-  }
-
-  onModuleDestroy(): void {
-    if (this.expiryTimer) clearInterval(this.expiryTimer);
-  }
 
   async create(userId: string, keyHeader: string | undefined, dto: CreateHoldDto) {
     const key = requireIdempotencyKey(keyHeader);
@@ -143,6 +124,12 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
         where: { id: { in: showSeatIds }, status: ShowSeatStatus.AVAILABLE },
         data: { status: ShowSeatStatus.HELD, activeHoldId: hold.id, holdExpiresAt: expiresAt },
       });
+      await this.outbox.record(tx, 'SeatHoldCreated', hold.id, {
+        userId,
+        showId: hold.showId,
+        showSeatIds,
+        expiresAt: expiresAt.toISOString(),
+      });
 
       const response = await tx.hold.findUniqueOrThrow({
         where: { id: hold.id },
@@ -208,6 +195,12 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
         data: { status, releasedAt: now },
         select: { id: true, status: true, releasedAt: true },
       });
+      await this.outbox.record(
+        tx,
+        status === HoldStatus.EXPIRED ? 'SeatHoldExpired' : 'SeatHoldReleased',
+        holdId,
+        { userId, showId: hold.showId },
+      );
       await tx.idempotencyKey.create({
         data: { userId, scope, key, requestHash: hash, response: this.asJson(response) },
       });
@@ -215,15 +208,24 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async expireDueHolds(): Promise<void> {
-    // TODO: Add pagination or repeated batch processing for more than 100 expired holds.
-    const due = await this.prisma.hold.findMany({
-      where: { status: HoldStatus.ACTIVE, expiresAt: { lte: new Date() } },
-      orderBy: { expiresAt: 'asc' },
-      take: 100,
-      select: { id: true },
-    });
-    for (const hold of due) await this.expireOne(hold.id);
+  async expireDueHolds(isStopping: () => boolean = () => false): Promise<number> {
+    const limit = this.config.get<number>('WORKER_BATCH_SIZE', 50);
+    // One short transaction per hold. Multiple workers skip rows already being recovered.
+    let expired = 0;
+    for (; expired < limit && !isStopping(); expired++) {
+      const processed = await this.prisma.$transaction(async (tx) => {
+        const due = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id" FROM "holds"
+          WHERE "status" = 'ACTIVE' AND "expiresAt" <= clock_timestamp()
+          ORDER BY "expiresAt", "id" LIMIT 1 FOR UPDATE SKIP LOCKED
+        `);
+        if (!due[0]) return false;
+        await this.expireLockedHold(tx, due[0].id);
+        return true;
+      });
+      if (!processed) break;
+    }
+    return expired;
   }
 
   private async expireOne(holdId: string): Promise<void> {
@@ -231,17 +233,25 @@ export class ReservationsService implements OnModuleInit, OnModuleDestroy {
       await tx.$queryRaw(
         Prisma.sql`SELECT "id" FROM "holds" WHERE "id" = ${holdId}::uuid FOR UPDATE`,
       );
-      const hold = await tx.hold.findUnique({ where: { id: holdId } });
-      if (!hold || hold.status !== HoldStatus.ACTIVE || hold.expiresAt > new Date()) return;
-      await this.lockHoldSeats(tx, holdId);
-      await tx.showSeat.updateMany({
-        where: { activeHoldId: holdId, status: ShowSeatStatus.HELD },
-        data: { status: ShowSeatStatus.AVAILABLE, activeHoldId: null, holdExpiresAt: null },
-      });
-      await tx.hold.update({
-        where: { id: holdId },
-        data: { status: HoldStatus.EXPIRED, releasedAt: new Date() },
-      });
+      await this.expireLockedHold(tx, holdId);
+    });
+  }
+
+  private async expireLockedHold(tx: Prisma.TransactionClient, holdId: string): Promise<void> {
+    const hold = await tx.hold.findUnique({ where: { id: holdId } });
+    if (!hold || hold.status !== HoldStatus.ACTIVE || hold.expiresAt > new Date()) return;
+    await this.lockHoldSeats(tx, holdId);
+    await tx.showSeat.updateMany({
+      where: { activeHoldId: holdId, status: ShowSeatStatus.HELD },
+      data: { status: ShowSeatStatus.AVAILABLE, activeHoldId: null, holdExpiresAt: null },
+    });
+    await tx.hold.update({
+      where: { id: holdId },
+      data: { status: HoldStatus.EXPIRED, releasedAt: new Date() },
+    });
+    await this.outbox.record(tx, 'SeatHoldExpired', holdId, {
+      userId: hold.userId,
+      showId: hold.showId,
     });
   }
 

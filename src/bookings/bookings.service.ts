@@ -1,7 +1,14 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { BookingStatus, Prisma, RefundStatus, ShowSeatStatus } from '../generated/prisma/client';
+import {
+  BookingStatus,
+  Prisma,
+  RefundStatus,
+  ShowSeatStatus,
+  TicketStatus,
+} from '../generated/prisma/client';
 import { replayResponse, requestHash, requireIdempotencyKey } from '../common/idempotency';
 import { PrismaService } from '../prisma/prisma.service';
+import { OutboxService } from '../outbox/outbox.service';
 import { BookingQueryDto } from './dto/booking-query.dto';
 
 const bookingInclude = {
@@ -30,7 +37,10 @@ const bookingInclude = {
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outbox: OutboxService,
+  ) {}
 
   async list(userId: string, query: BookingQueryDto) {
     const where: Prisma.BookingWhereInput = { userId };
@@ -62,6 +72,19 @@ export class BookingsService {
     });
     if (!booking) throw new NotFoundException('Booking not found');
     return booking;
+  }
+
+  async getTicket(userId: string, bookingId: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, userId },
+      select: { status: true, ticket: true },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    return {
+      status:
+        booking.status === BookingStatus.CANCELLED ? 'VOID' : booking.ticket ? 'READY' : 'PENDING',
+      ticket: booking.ticket,
+    };
   }
 
   async cancel(userId: string, bookingId: string, keyHeader: string | undefined) {
@@ -118,7 +141,13 @@ export class BookingsService {
         where: { id: bookingId },
         data: { status: BookingStatus.CANCELLED, cancelledAt: new Date() },
       });
-      await tx.refund.create({
+      // Serializes with ticket generation on the booking lock. A delayed confirmation
+      // event can never reactivate a ticket after cancellation.
+      await tx.ticket.updateMany({
+        where: { bookingId, status: TicketStatus.ACTIVE },
+        data: { status: TicketStatus.VOID, voidedAt: new Date() },
+      });
+      const refund = await tx.refund.create({
         data: {
           bookingId,
           amountMinor: booking.totalMinor,
@@ -127,6 +156,11 @@ export class BookingsService {
           refundedAt: new Date(),
         },
       });
+      await this.outbox.record(tx, 'BookingCancelled', bookingId, {
+        userId,
+        holdId: booking.holdId,
+      });
+      await this.outbox.record(tx, 'RefundSucceeded', refund.id, { userId, bookingId });
       const response = await tx.booking.findUniqueOrThrow({
         where: { id: bookingId },
         include: bookingInclude,

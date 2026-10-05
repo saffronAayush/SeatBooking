@@ -74,6 +74,7 @@ model User {
   bookings      Booking[]
   paymentIntents PaymentIntent[]
   idempotencyKeys IdempotencyKey[]
+  notifications Notification[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -271,6 +272,7 @@ model PaymentIntent {
 
   @@index([userId, createdAt])
   @@index([holdId, status])
+  @@index([status, createdAt])
   @@map("payment_intents")
 }
 
@@ -303,6 +305,7 @@ model Booking {
   paymentIntent    PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Restrict)
   seats            BookingSeat[]
   refund           Refund?
+  ticket           Ticket?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -367,4 +370,66 @@ model RefreshToken {
   @@index([familyId])
   @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventKey      String    @unique
+  eventType     String
+  aggregateId   String    @db.Uuid
+  payload       Json
+  correlationId String
+  createdAt     DateTime  @default(now())
+  availableAt   DateTime  @default(now())
+  publishedAt   DateTime?
+  lockedUntil   DateTime?
+  lockToken     String?   @db.Uuid
+  attempts      Int       @default(0)
+  lastError     String?
+
+  @@index([publishedAt, availableAt, lockedUntil])
+  @@map("outbox_events")
+}
+
+model ConsumedEvent {
+  consumer    String
+  eventId     String   @db.Uuid
+  processedAt DateTime @default(now())
+
+  @@id([consumer, eventId])
+  @@map("consumed_events")
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @unique @db.Uuid
+  userId    String   @db.Uuid
+  kind      String
+  title     String
+  message   String
+  data      Json
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt, id])
+  @@map("notifications")
+}
+
+enum TicketStatus {
+  ACTIVE
+  VOID
+}
+
+model Ticket {
+  id        String       @id @default(uuid()) @db.Uuid
+  bookingId String       @unique @db.Uuid
+  code      String       @unique @default(uuid()) @db.Uuid
+  status    TicketStatus @default(ACTIVE)
+  snapshot  Json
+  createdAt DateTime     @default(now())
+  voidedAt  DateTime?
+  booking   Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@map("tickets")
 }

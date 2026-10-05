@@ -51,8 +51,17 @@ The catalog includes:
 - paginated customer booking history and booking details;
 - cancellation, inventory release, and simulated refunds.
 
-Automated tests are intentionally deferred for now. The Phase 3 high-contention test work is
-therefore the only excluded item from these phases.
+### Phase 5 - Asynchronous architecture
+
+- transactional outbox events for holds, bookings, payment failures, and refunds;
+- independent RabbitMQ worker with publisher confirms, recoverable outbox leases, and manual acknowledgements;
+- durable quorum queues, exponential retries, and a dead-letter queue;
+- idempotent in-app notifications and stored JSON tickets;
+- worker-owned hold expiry, unfinished payment reconciliation, and missing booking/refund event recovery;
+- cancellation-safe ticket invalidation and customer notification/ticket endpoints.
+
+Automated tests remain deferred. See [the asynchronous operations guide](./docs/ASYNC_ARCHITECTURE.md)
+for delivery guarantees, recovery behavior, configuration, and dead-letter handling.
 
 ## Local development
 
@@ -61,22 +70,27 @@ Requirements: Node.js 24+, npm, and Docker.
 ```bash
 copy .env.example .env
 npm install
-docker compose up -d postgres
+docker compose up -d postgres rabbitmq
 npm run prisma:migrate:deploy
-npm run start:dev
+npm run prisma:generate
+npm run build
+npm run dev
 ```
+
+In a second terminal, run `npm run worker`. Restart it after rebuilding worker code, or use
+`npm run worker:dev` while developing the worker. Both watch commands write to `dist`; avoid
+running both watch modes at once. Keep the worker running for expiry and asynchronous delivery.
 
 Open:
 
 - API documentation: <http://localhost:3000/docs>
 - Liveness: <http://localhost:3000/api/v1/health/live>
 - Readiness: <http://localhost:3000/api/v1/health/ready>
+- RabbitMQ management: <http://localhost:15672> (local username/password: `seatforge` / `seatforge`)
 
-Run all verification commands:
+Compile the project:
 
 ```bash
-npm run format:check
-npm run lint
 npm run build
 ```
 
@@ -86,7 +100,10 @@ Start the complete production-style local stack:
 docker compose up --build
 ```
 
-The Docker API container applies pending Prisma migrations before starting.
+The Compose migration service applies pending migrations before the API and worker start.
+The API does not require RabbitMQ to be available: committed outbox events wait for the worker.
+The RabbitMQ volume preserves queues across container restarts. Use
+`docker compose up -d --scale worker=2` to run multiple competing workers.
 
 ## Authentication endpoints
 
@@ -164,6 +181,13 @@ These routes require a customer access token. Retryable writes require an `Idemp
 - `GET /bookings`
 - `GET /bookings/:bookingId`
 - `POST /bookings/:bookingId/cancel`
+- `GET /bookings/:bookingId/ticket`
+- `GET /notifications?page=1&limit=20`
+- `PATCH /notifications/:notificationId/read`
+
+Ticket reads return `PENDING` until generation completes, `READY` with a stored JSON ticket,
+or `VOID` after cancellation. Notifications are in-app records; no email provider is required.
+Marking a notification read is naturally idempotent and needs no `Idempotency-Key`.
 
 The JWT-authenticated `POST /payments/simulator/callback` route simulates a successful or failed
 local payment for a payment intent owned by the customer.

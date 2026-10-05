@@ -10,12 +10,16 @@ import {
 } from '../generated/prisma/client';
 import { replayResponse, requestHash, requireIdempotencyKey } from '../common/idempotency';
 import { PrismaService } from '../prisma/prisma.service';
+import { OutboxService } from '../outbox/outbox.service';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { PaymentCallbackDto } from './dto/payment-callback.dto';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outbox: OutboxService,
+  ) {}
 
   async createIntent(userId: string, keyHeader: string | undefined, dto: CreatePaymentIntentDto) {
     const key = requireIdempotencyKey(keyHeader);
@@ -176,6 +180,11 @@ export class PaymentsService {
         where: { id: intent.id },
         data: { status: PaymentIntentStatus.SUCCEEDED },
       });
+      await this.outbox.record(tx, 'BookingConfirmed', booking.id, {
+        userId: intent.userId,
+        holdId: intent.holdId,
+        paymentIntentId: intent.id,
+      });
       const response = {
         paymentIntentId: intent.id,
         paymentStatus: PaymentIntentStatus.SUCCEEDED,
@@ -193,7 +202,7 @@ export class PaymentsService {
     holdId: string,
     reason: string,
   ) {
-    await tx.paymentIntent.update({
+    const intent = await tx.paymentIntent.update({
       where: { id: paymentIntentId },
       data: { status: PaymentIntentStatus.FAILED, failureReason: reason },
     });
@@ -201,12 +210,25 @@ export class PaymentsService {
       where: { activeHoldId: holdId, status: ShowSeatStatus.HELD },
       data: { status: ShowSeatStatus.AVAILABLE, activeHoldId: null, holdExpiresAt: null },
     });
-    await tx.hold.updateMany({
+    const released = await tx.hold.updateMany({
       where: { id: holdId, status: HoldStatus.ACTIVE },
       data: {
         status: reason === 'HOLD_EXPIRED' ? HoldStatus.EXPIRED : HoldStatus.RELEASED,
         releasedAt: new Date(),
       },
+    });
+    if (released.count > 0) {
+      await this.outbox.record(
+        tx,
+        reason === 'HOLD_EXPIRED' ? 'SeatHoldExpired' : 'SeatHoldReleased',
+        holdId,
+        { userId: intent.userId },
+      );
+    }
+    await this.outbox.record(tx, 'PaymentFailed', paymentIntentId, {
+      userId: intent.userId,
+      holdId,
+      reason,
     });
     return {
       paymentIntentId,
@@ -215,6 +237,39 @@ export class PaymentsService {
       callbackStatus: PaymentEventStatus.PROCESSED,
       failureReason: reason,
     };
+  }
+
+  async reconcilePending(limit: number, isStopping: () => boolean = () => false): Promise<number> {
+    let recovered = 0;
+    for (; recovered < limit && !isStopping(); recovered++) {
+      const processed = await this.prisma.$transaction(async (tx) => {
+        // Match callback lock order: intent -> hold -> ordered seats.
+        const rows = await tx.$queryRaw<Array<{ id: string; holdId: string }>>(Prisma.sql`
+          SELECT p."id", p."holdId" FROM "payment_intents" p
+          INNER JOIN "holds" h ON h."id" = p."holdId"
+          WHERE p."status" = 'PENDING'
+            AND (h."status" <> 'ACTIVE' OR h."expiresAt" <= clock_timestamp())
+          ORDER BY p."createdAt", p."id" LIMIT 1 FOR UPDATE OF p SKIP LOCKED
+        `);
+        const intent = rows[0];
+        if (!intent) return false;
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "holds" WHERE "id" = ${intent.holdId}::uuid FOR UPDATE
+        `);
+        const hold = await tx.hold.findUniqueOrThrow({ where: { id: intent.holdId } });
+        if (hold.status === HoldStatus.ACTIVE && hold.expiresAt > new Date()) return false;
+        await this.lockHoldSeats(tx, intent.holdId);
+        const reason =
+          hold.status === HoldStatus.EXPIRED ||
+          (hold.status === HoldStatus.ACTIVE && hold.expiresAt <= new Date())
+            ? 'HOLD_EXPIRED'
+            : 'HOLD_UNAVAILABLE';
+        await this.failPayment(tx, intent.id, intent.holdId, reason);
+        return true;
+      });
+      if (!processed) break;
+    }
+    return recovered;
   }
 
   private async recordEvent(

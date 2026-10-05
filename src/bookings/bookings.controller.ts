@@ -33,4 +33,10 @@ export class BookingsController {
   ) {
     return this.bookings.cancel(user.id, id, key);
   }
+
+  @Get(':bookingId/ticket')
+  @ApiOperation({ summary: 'Get the generated ticket, or PENDING while the worker processes it' })
+  ticket(@CurrentUser() user: JwtUser, @Param('bookingId', new ParseUUIDPipe()) id: string) {
+    return this.bookings.getTicket(user.id, id);
+  }
 }

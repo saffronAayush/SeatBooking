@@ -15,10 +15,39 @@ services:
       timeout: 3s
       retries: 10
 
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: seatforge
+      RABBITMQ_DEFAULT_PASS: seatforge
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    volumes:
+      - seatforge-rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      target: production
+    command: ['node', 'node_modules/prisma/build/index.js', 'migrate', 'deploy']
+    environment:
+      DATABASE_URL: postgresql://seatforge:seatforge@postgres:5432/seatforge?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
       target: production
+    command: ['node', 'dist/main.js']
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -31,8 +60,8 @@ services:
     ports:
       - '3000:3000'
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -45,5 +74,28 @@ services:
       timeout: 3s
       retries: 5
 
+  worker:
+    build:
+      context: .
+      target: production
+    command: ['node', 'dist/worker.js']
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://seatforge:seatforge@postgres:5432/seatforge?schema=public
+      RABBITMQ_URL: amqp://seatforge:seatforge@rabbitmq:5672?heartbeat=10
+      HOLD_EXPIRY_INTERVAL_MS: 5000
+      RECONCILIATION_INTERVAL_MS: 30000
+      WORKER_PREFETCH: 10
+      WORKER_BATCH_SIZE: 50
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+
 volumes:
   seatforge-postgres:
+  seatforge-rabbitmq:
