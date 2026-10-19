@@ -12,3 +12,13 @@ tmp/
 learning.md
 
 .npm-cache/
+
+# Keep documentation local, except README files.
+*.[mM][dD]
+*.[mM][dD][xX]
+*.[rR][sS][tT]
+*.[tT][xX][tT]
+docs/**
+!docs/**/
+![rR][eE][aA][dD][mM][eE]
+![rR][eE][aA][dD][mM][eE].*

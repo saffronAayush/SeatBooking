@@ -1,6 +1,6 @@
 # SeatForge
 
-SeatForge is a concurrency-safe ticket booking platform built to demonstrate production-style backend engineering and system design. The implementation follows the phased plan in [BACKEND_PROJECT_PLAN.md](./BACKEND_PROJECT_PLAN.md).
+SeatForge is a concurrency-safe ticket booking platform built to demonstrate production-style backend engineering and system design.
 
 ## Implemented phases
 
@@ -60,24 +60,38 @@ The catalog includes:
 - worker-owned hold expiry, unfinished payment reconciliation, and missing booking/refund event recovery;
 - cancellation-safe ticket invalidation and customer notification/ticket endpoints.
 
-Automated tests remain deferred. See [the asynchronous operations guide](./docs/ASYNC_ARCHITECTURE.md)
-for delivery guarantees, recovery behavior, configuration, and dead-letter handling.
+Automated tests remain deferred.
+
+### Phase 6 - V1 scale and observe
+
+Source and configuration include Redis catalog caching and distributed rate limits,
+two API replicas behind Nginx, two independent workers, Prometheus metrics, a provisioned
+Grafana dashboard, OpenTelemetry traces, and internal readiness/metrics endpoints.
+Runtime verification and lockfile synchronization remain deferred.
+
+### Phase 7 - V1 documentation and presentation
+
+Local documentation includes four source-based diagrams, five architecture decision
+records, a failure-behavior report, performance evidence status, and a demo guide.
+Supporting documentation is kept locally and excluded from Git; README is the public
+project guide. Measured validation and a recorded demo remain deferred. No performance
+numbers or recovery results are claimed.
 
 ## Local development
 
-Requirements: Node.js 24+, npm, and Docker.
+Requirements: Node.js 24+, npm, and Docker. The commands below describe future runtime setup; they were not executed during the documentation-only Phase 7 work. Phase 6 dependencies are declared in package.json but its lockfile is intentionally unchanged; dependency and lockfile synchronization is a prerequisite for future Docker builds, whose dependency step uses npm ci.
 
 ```bash
 copy .env.example .env
 npm install
-docker compose up -d postgres rabbitmq
+docker compose up -d postgres rabbitmq redis
 npm run prisma:migrate:deploy
 npm run prisma:generate
 npm run build
 npm run dev
 ```
 
-In a second terminal, run `npm run worker`. Restart it after rebuilding worker code, or use
+In a second terminal, set `OPERATIONS_PORT=9465` and `OTEL_SERVICE_NAME=seatforge-worker` in the environment, then run `npm run worker`. Restart it after rebuilding worker code, or use
 `npm run worker:dev` while developing the worker. Both watch commands write to `dist`; avoid
 running both watch modes at once. Keep the worker running for expiry and asynchronous delivery.
 
@@ -103,7 +117,7 @@ docker compose up --build
 The Compose migration service applies pending migrations before the API and worker start.
 The API does not require RabbitMQ to be available: committed outbox events wait for the worker.
 The RabbitMQ volume preserves queues across container restarts. Use
-`docker compose up -d --scale worker=2` to run multiple competing workers.
+`docker compose up -d --scale api=3 --scale worker=3` to adjust APIs and workers independently. The default is two of each. Nginx owns host port 3000; Grafana is at <http://localhost:3001> and Prometheus at <http://localhost:9090>.
 
 ## Authentication endpoints
 
@@ -139,8 +153,7 @@ venue. For example, `Balcony / GOLD` and `Ground / GOLD` are separate prices. A 
 three-letter ISO currency, while each price stores an integer minor-unit amount.
 
 `ShowSeat` stores per-show availability for a physical seat and references the applicable
-`ShowPrice`; it does not copy the monetary amount or currency. The final amount paid should be
-snapshotted on the future booking item so historical purchases never change.
+`ShowPrice`; it does not copy the monetary amount or currency. Held and booked seat records snapshot the amount and currency so historical purchases never change.
 
 Show creation, section/category prices, and generated seat inventory are committed in one
 PostgreSQL transaction.
